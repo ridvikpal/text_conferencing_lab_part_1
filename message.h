@@ -22,7 +22,7 @@ enum MessageType {
 };
 
 typedef struct Message {
-    unsigned int type;
+    unsigned int type; // this is really just MessageType
     unsigned int size;
     unsigned char source[SOURCE_SIZE];
     unsigned char data[DATA_SIZE];
