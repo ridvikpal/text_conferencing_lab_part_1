@@ -12,10 +12,18 @@
 #include <sys/time.h>
 #include <pthread.h>
 
+// define the input buffer size
+#define BUFFER_SIZE 64
+// define the # of pending connections the queue can hold
+#define PENDING_CONN 10
+// define the authentication file that contains the username and password
+#define USER_LIST "users.txt"
+
+
+
 // Function to run when adding new client
 void add_new_client(){
     
-
 }
 
 
