@@ -307,8 +307,9 @@ void add_new_client(User *new_user) {
                 // Prepare message to be sent
                 memset(&messageSend, 0, sizeof(Message));
                 messageSend.type = MESSAGE;
-                strcpy((char *) (messageSend.source), new_user->uname);
-                strcpy((char *) (messageSend.data), (char *) (pktRecv.data));
+                strcpy((char *) (messageSend.source), new_user->username);
+                strcpy((char *) (messageSend.data),
+                       (char *) (messageRecieved.data));
                 messageSend.size = strlen((char *) (messageSend.data));
 
                 // Use recv() buffer
