@@ -20,7 +20,7 @@ typedef struct User {
     bool inSession;
 
     // the session the user has joined
-    Session *joinedSession;
+    struct Session *joinedSession;
 
     // the next user in the session
     struct User *next;
