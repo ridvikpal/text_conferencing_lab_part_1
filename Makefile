@@ -1,25 +1,22 @@
 CC = gcc
 CFLAGS = -I.
+LIBS = -lpthread
 
 DEPS = message.h session.h user.h
-TARGET = server client message session user
+OBJ = client.o server.o message.o session.o user.o
 
-all: ${TARGET}
+TARGETS = server client
 
-server: server.c ${DEPS}
-		gcc -o server server.c ${CFLAGS}
+all: $(TARGETS)
 
-client: client.c ${DEPS}
-		gcc -o client client.c ${CFLAGS}
+server: server.o message.o session.o user.o
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
-message: message.c ${DEPS}
-		gcc -o message message.c ${CFLAGS}
+client: client.o message.o session.o user.o
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
-session: session.c ${DEPS}
-		gcc -o session session.c ${CFLAGS}
-
-session: user.c ${DEPS}
-		gcc -o user user.c ${CFLAGS}
+%.o: %.c $(DEPS)
+	$(CC) -c -o $@ $< $(CFLAGS)
 
 clean:
-		rm -f ${TARGET}
+	rm -f $(TARGETS) *.o
