@@ -21,4 +21,5 @@ session: session.c ${DEPS}
 session: user.c ${DEPS}
 		gcc -o user user.c ${CFLAGS}
 
-clean: rm -f ${TARGET}
+clean:
+		rm -f ${TARGET}

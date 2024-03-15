@@ -17,21 +17,20 @@ enum MessageType {
     NS_ACK,
     MESSAGE,
     QUERY,
-    QU_ACK,
-    INVIT, // a special type of message for inviting (part 2)
+    QU_ACK
 };
 
 typedef struct Message {
-    unsigned int type; // this is really just MessageType
+    unsigned int type; // actually the MessageType enum
     unsigned int size;
     unsigned char source[SOURCE_SIZE];
     unsigned char data[DATA_SIZE];
 } Message;
 
 // convert the message packet to a fixed size string
-void messageToString(const Message* _packet, char* _string);
+void messageToString(const Message* _message, char* _string);
 
 // convert a string to a packet
-void messageToPacket(const char* _string, Message* _packet);
+void stringToMessage(const char* _string, Message* _message);
 
 #endif
