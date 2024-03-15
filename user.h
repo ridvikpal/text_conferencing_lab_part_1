@@ -16,7 +16,7 @@ typedef struct User {
 
     // client status
     int socketFD;
-    pthread_t p;
+    pthread_t pthread;
     bool inSession;
 
     // the session the user has joined
