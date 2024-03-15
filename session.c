@@ -128,7 +128,7 @@ void deleteSessionList(Session *_sessionList) {
 
     while (current != NULL) {
         // make sure to delete the entire user list for the session as well
-        destroyUserList(current->user);
+        deleteUserList(current->user);
         next = current->next;
         free(current);
         current = next;
