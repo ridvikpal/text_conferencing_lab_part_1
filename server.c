@@ -14,9 +14,11 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 // define the input string buffer size
-#define BUFFER_SIZE 64
+#define INPUT_BUFFER_SIZE 64
+#define BUFFER_SIZE 600
 // define the # of pending connections the queue can hold
 #define PENDING_CONN 10
 // define the authentication file that contains the username and password
@@ -36,7 +38,7 @@ User *globalUserList = NULL;
 User *globalUserListLoggedIn = NULL; // 
 Session *globalSessionList = NULL;
 
-char globalInputBuffer[BUFFER_SIZE] = {0};
+char globalInputBuffer[INPUT_BUFFER_SIZE] = {0};
 
 // get the sockaddr from Beej's network guide to programming
 void *get_in_addr(struct sockaddr *sa) {
@@ -55,6 +57,7 @@ void *handle_new_client(void *args) {
     char recvBuffer[BUFFER_SIZE];
     char source[SOURCE_SIZE];
     int bytesSent, bytesRecieved;
+
     Message messageSend, messageRecieved;
 
     printf("New thread created\n");
@@ -65,9 +68,11 @@ void *handle_new_client(void *args) {
 
     while (1) {
         // intially clear all buffers and message packets
+        printf("started while loop\n");
         memset(recvBuffer, 0, sizeof(char) * BUFFER_SIZE);
         memset(&messageRecieved, 0, sizeof(Message));
         memset(&messageSend, 0, sizeof(Message));
+        printf("cleared buffers with memset\n");
 
         // we do buffer size - 1 because we need to add null character to the
         // end of the buffer to make it a standard c string
@@ -78,8 +83,10 @@ void *handle_new_client(void *args) {
             return NULL;
         }
 
+        printf("got data from recv\n");
         // add null character to make the data a string
         recvBuffer[bytesRecieved] = '\0';
+        toSend = false;
         printf("Message recieved via recv: %s\n", recvBuffer);
 
         // parse the recieved string into a actual message packet
@@ -133,6 +140,7 @@ void *handle_new_client(void *args) {
 
                     // save the username in the source
                     strcpy(source, new_user->username);
+                    free(tempUser);
 
                 } else {
                     printf("Login Error\n");
@@ -164,222 +172,235 @@ void *handle_new_client(void *args) {
                 strcpy((char *) (messageSend.data),
                        "Error: Must login first\n");
             }
-        } else {
-            if (messageRecieved.type == JOIN) {
-                int sessionID = atoi((char *) (messageRecieved.data));
-                printf("User %s is trying to join session %s\n",
+        } else if (messageRecieved.type == JOIN) {
+            int sessionID = atoi((char *) (messageRecieved.data));
+            printf("User %s is trying to join session %d\n",
+                   new_user->username, sessionID);
+
+            // check if the session id exists
+            Session *matchingSession = searchSession(globalSessionList,
+                                                     sessionID);
+            if (matchingSession == NULL) {
+                // setup the packet to send back
+                messageSend.type = JN_NAK;
+                toSend = true;
+                int cursor = sprintf((char *) (messageSend.data), "%d",
+                                     sessionID);
+                strcpy((char *) (messageSend.data + cursor),
+                       " Session does not exist");
+                printf("Error: Failed to join session %d because session "
+                       "does not exist\n", sessionID);
+            } else if (checkUserInSession(globalSessionList, sessionID,
+                                          new_user)) {
+                // setup the packet to send back
+                messageSend.type = JN_NAK;
+                toSend = true;
+                int cursor = sprintf((char *) (messageSend.data), "%d",
+                                     sessionID);
+                strcpy((char *) (messageSend.data + cursor),
+                       " Session already joined");
+                printf("Error: Failed to join session %d because user %s "
+                       "has already joined this session\n",
+                       sessionID, new_user->username);
+            } else {
+                // Update messageSend
+                messageSend.type = JN_ACK;
+                toSend = true;
+                // put the session id we are joining in the data
+                sprintf((char *) (messageSend.data), "%d", sessionID);
+
+                // update the global sessionList
+                pthread_mutex_lock(&sessionListMutex);
+                globalSessionList = insertNewUserIntoSession(
+                        globalSessionList, sessionID, new_user);
+                pthread_mutex_unlock(&sessionListMutex);
+
+                // Update private sessionJoined
+                sessionJoined = initNewSession(sessionJoined, sessionID);
+
+                printf("User %s has joined session %d\n",
                        new_user->username, sessionID);
 
-                // check if the session id exists
-                Session *matchingSession = searchSession(globalSessionList,
-                                                         sessionID);
-                if (matchingSession == NULL) {
-                    // setup the packet to send back
-                    messageSend.type = JN_NAK;
-                    toSend = true;
-                    int cursor = sprintf((char *) (messageSend.data), "%d",
-                                         sessionID);
-                    strcpy((char *) (messageSend.data + cursor),
-                           " Session does not exist");
-                    printf("Error: Failed to join session %d because session "
-                           "does not exist\n", sessionID);
-                } else if (checkUserInSession(globalSessionList, sessionID,
-                                              new_user)) {
-                    // setup the packet to send back
-                    messageSend.type = JN_NAK;
-                    toSend = true;
-                    int cursor = sprintf((char *) (messageSend.data), "%d",
-                                         sessionID);
-                    strcpy((char *) (messageSend.data + cursor),
-                           " Session already joined");
-                    printf("Error: Failed to join session %d because user %s "
-                           "has already joined this session\n",
-                           new_user->username, sessionID);
-                } else {
-                    // Update messageSend
-                    messageSend.type = JN_ACK;
-                    toSend = 1;
-                    sprintf((char *) (messageSend.data), "%d", sessionID);
-
-                    // update the global sessionList
-                    pthread_mutex_lock(&sessionListMutex);
-                    globalSessionList = insertNewUserIntoSession(
-                            globalSessionList, sessionID, new_user);
-                    pthread_mutex_unlock(&sessionListMutex);
-
-                    // Update private sessJoined
-                    sessionJoined = initNewSession(sessionJoined, sessionID);
-
-                    printf("User %s has joined session %d\n",
-                           new_user->username, sessionID);
-
-                    // Update user status in userConnected
-                    pthread_mutex_lock(&userLoginMutex);
-                    for (User *user = globalUserListLoggedIn;
-                         user != NULL; user = user->next) {
-                        if (strcmp(user->username, source) == 0) {
-                            user->inSession = true;
-                            user->joinedSession = initNewSession(
-                                    user->joinedSession,
-                                    sessionID);
-                        }
-                    }
-                    pthread_mutex_unlock(&userLoginMutex);
-                }
-
-            } else if (messageRecieved.type == LEAVE_SESS) {
-                printf("User %s is leaving all sessions\n", new_user->username);
-                // Iterate until all session left
-                while (sessionJoined != NULL) {
-                    int currentSessionID = sessionJoined->id;
-
-                    // Free private sessionJoined
-                    Session *current = sessionJoined;
-                    sessionJoined = sessionJoined->next;
-                    free(current);
-
-                    // Free global sessionList
-                    pthread_mutex_lock(&sessionListMutex);
-                    globalSessionList = removeUserFromSession(globalSessionList,
-                                                              currentSessionID,
-                                                              new_user);
-                    pthread_mutex_unlock(&sessionListMutex);
-
-                    printf("User %s has left session %d\n", new_user->username,
-                           currentSessionID);
-                }
-                messageToString(&messageSend, recvBuffer);
-
-                // Update user status in userConnected;
+                // Update user status in userConnected
                 pthread_mutex_lock(&userLoginMutex);
                 for (User *user = globalUserListLoggedIn;
                      user != NULL; user = user->next) {
                     if (strcmp(user->username, source) == 0) {
-                        deleteSessionList(user->joinedSession);
-                        user->joinedSession = NULL;
-                        user->inSession = 0;
-                        break;
-                    }
-                }
-                pthread_mutex_unlock(&userLoginMutex);
-            } else if (messageRecieved.type == NEW_SESS) {
-                printf("User %s is making a new session\n", new_user->username);
-
-                // update the global session list
-                messageToString(&messageSend, recvBuffer);
-                pthread_mutex_lock(&sessionListMutex);
-                globalSessionList = initNewSession(globalSessionList,
-                                                   numOfSessions);
-                pthread_mutex_unlock(&sessionListMutex);
-
-                // join the current user to the session that was just created
-                sessionJoined = initNewSession(sessionJoined, numOfSessions);
-                pthread_mutex_lock(&sessionListMutex);
-                globalSessionList = insertNewUserIntoSession(globalSessionList,
-                                                             numOfSessions,
-                                                             new_user);
-                pthread_mutex_unlock(&sessionListMutex);
-
-                // Update user status in the global user logged in list;
-                pthread_mutex_lock(&userLoginMutex);
-                for (User *user = globalUserListLoggedIn;
-                     user != NULL; user = user->next) {
-                    if (strcmp(user->username, source) == 0) {
-                        user->inSession = 1;
+                        user->inSession = true;
                         user->joinedSession = initNewSession(
                                 user->joinedSession,
-                                numOfSessions);
+                                sessionID);
                     }
                 }
                 pthread_mutex_unlock(&userLoginMutex);
-
-                // update the message to send
-                messageSend.type = NS_ACK;
-                toSend = true;
-                // we have to send the number of sessions back to the client
-                sprintf((char *) (messageSend.data), "%d", numOfSessions);
-
-                // increase the number of sessions since we made a new one
-                pthread_mutex_lock(&sessionCountMutex);
-                numOfSessions = numOfSessions + 1;
-                pthread_mutex_unlock(&sessionCountMutex);
-
-            } else if (messageRecieved.type == MESSAGE) {
-
-                printf("User %s is sending message \"%s\"\n",
-                       new_user->username, messageSend.data);
-
-                // Session to send to
-                int currentSession = atoi(messageSend.source);
-
-                // Prepare message to be sent
-                memset(&messageSend, 0, sizeof(Message));
-                messageSend.type = MESSAGE;
-                strcpy((char *) (messageSend.source), new_user->username);
-                strcpy((char *) (messageSend.data),
-                       (char *) (messageRecieved.data));
-                messageSend.size = strlen((char *) (messageSend.data));
-
-                // store the message in recv buffer
-                memset(recvBuffer, 0, sizeof(char) * BUFFER_SIZE);
-                messageToString(&messageSend, recvBuffer);
-                printf("sending message %s to session\n",
-                       recvBuffer);
-
-                // Send though local session list
-                for (Session *current = sessionJoined;
-                     current != NULL; current = current->next) {
-                    // Find corresponding session in global sessionList
-                    Session *sessToSend;
-                    if ((sessToSend = searchSession(globalSessionList,
-                                                    current->id)) == NULL)
-                        continue;
-                    printf("%d", sessToSend->id);
-                    for (User *user = sessToSend->user;
-                         user != NULL; user = user->next) {
-                        if ((bytesSent = send(user->socketFD, recvBuffer,
-                                              BUFFER_SIZE - 1, 0)) == -1) {
-                            printf("error sending the packet\n");
-                            exit(1);
-                        }
-                    }
-                }
-                printf("\n");
-                toSend = false;
-            } else if (messageRecieved.type == QUERY) {
-                printf("User %s is making a query\n", new_user->username);
-
-                int cursor = 0;
-                messageSend.type = QU_ACK;
-                toSend = true;
-
-                for (User *user = globalUserListLoggedIn;
-                     user != NULL; user = user->next) {
-                    cursor += sprintf((char *) (messageSend.data) + cursor,
-                                      "%s", user->username);
-                    for (Session *sess = user->joinedSession;
-                         sess != NULL; sess = sess->next) {
-                        cursor += sprintf((char *) (messageSend.data) + cursor,
-                                          "\t%d", sess->id);
-                    }
-                    messageSend.data[cursor++] = '\n';
-                }
-
-                printf("Query Result:\n%s", messageSend.data);
             }
+
+        } else if (messageRecieved.type == LEAVE_SESS) {
+            printf("User %s is leaving all sessions\n", new_user->username);
+            // Iterate until all session left
+            while (sessionJoined != NULL) {
+                int currentSessionID = sessionJoined->id;
+
+                // Free private sessionJoined
+                Session *current = sessionJoined;
+                sessionJoined = sessionJoined->next;
+                free(current);
+
+                // Free global sessionList
+                pthread_mutex_lock(&sessionListMutex);
+                globalSessionList = removeUserFromSession(globalSessionList,
+                                                          currentSessionID,
+                                                          new_user);
+                pthread_mutex_unlock(&sessionListMutex);
+
+                printf("User %s has left session %d\n", new_user->username,
+                       currentSessionID);
+            }
+            messageToString(&messageSend, recvBuffer);
+
+            // Update user status in userConnected;
+            pthread_mutex_lock(&userLoginMutex);
+            for (User *user = globalUserListLoggedIn;
+                 user != NULL; user = user->next) {
+                if (strcmp(user->username, source) == 0) {
+                    deleteSessionList(user->joinedSession);
+                    user->joinedSession = NULL;
+                    user->inSession = 0;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&userLoginMutex);
+        } else if (messageRecieved.type == NEW_SESS) {
+            printf("User %s is making a new session\n", new_user->username);
+
+            // update the global session list
+            messageToString(&messageSend, recvBuffer);
+            pthread_mutex_lock(&sessionListMutex);
+            globalSessionList = initNewSession(globalSessionList,
+                                               numOfSessions);
+            pthread_mutex_unlock(&sessionListMutex);
+
+            // join the current user to the session that was just created
+            sessionJoined = initNewSession(sessionJoined, numOfSessions);
+            pthread_mutex_lock(&sessionListMutex);
+            globalSessionList = insertNewUserIntoSession(globalSessionList,
+                                                         numOfSessions,
+                                                         new_user);
+            pthread_mutex_unlock(&sessionListMutex);
+
+            // Update user status in the global user logged in list;
+            pthread_mutex_lock(&userLoginMutex);
+            for (User *user = globalUserListLoggedIn;
+                 user != NULL; user = user->next) {
+                if (strcmp(user->username, source) == 0) {
+                    user->inSession = 1;
+                    user->joinedSession = initNewSession(
+                            user->joinedSession,
+                            numOfSessions);
+                }
+            }
+            pthread_mutex_unlock(&userLoginMutex);
+
+            // update the message to send
+            messageSend.type = NS_ACK;
+            toSend = true;
+            // we have to send the number of sessions back to the client
+            sprintf((char *) (messageSend.data), "%d", numOfSessions);
+
+            // increase the number of sessions since we made a new one
+            pthread_mutex_lock(&sessionCountMutex);
+            numOfSessions = numOfSessions + 1;
+            pthread_mutex_unlock(&sessionCountMutex);
+
+            printf("User %s has successfully created session %d\n",
+                   new_user->username, numOfSessions - 1);
+        } else if (messageRecieved.type == MESSAGE) {
+
+            printf("User %s is sending message \"%s\"\n",
+                   new_user->username, messageSend.data);
+
+            // Session to send to
+            int currentSession = atoi(messageSend.source);
+
+            // Prepare message to be sent
+            memset(&messageSend, 0, sizeof(Message));
+            messageSend.type = MESSAGE;
+            strcpy((char *) (messageSend.source), new_user->username);
+            strcpy((char *) (messageSend.data),
+                   (char *) (messageRecieved.data));
+            messageSend.size = strlen((char *) (messageSend.data));
+
+            // store the message in recv buffer
+            memset(recvBuffer, 0, sizeof(char) * BUFFER_SIZE);
+            messageToString(&messageSend, recvBuffer);
+            printf("sending message %s to session\n",
+                   recvBuffer);
+
+            // Send though local session list
+            for (Session *current = sessionJoined;
+                 current != NULL; current = current->next) {
+                // Find corresponding session in global sessionList
+                Session *sessToSend;
+                if ((sessToSend = searchSession(globalSessionList,
+                                                current->id)) == NULL)
+                    continue;
+                printf("%d", sessToSend->id);
+                for (User *user = sessToSend->user;
+                     user != NULL; user = user->next) {
+                    if ((bytesSent = send(user->socketFD, recvBuffer,
+                                          BUFFER_SIZE - 1, 0)) == -1) {
+                        printf("error sending the packet\n");
+                        exit(1);
+                    }
+                }
+            }
+            printf("\n");
+            toSend = false;
+        } else if (messageRecieved.type == QUERY) {
+            printf("User %s is making a query\n", new_user->username);
+
+            int cursor = 0;
+            messageSend.type = QU_ACK;
+            toSend = true;
+
+            for (User *user = globalUserListLoggedIn;
+                 user != NULL; user = user->next) {
+                cursor += sprintf((char *) (messageSend.data) + cursor,
+                                  "%s", user->username);
+                for (Session *sess = user->joinedSession;
+                     sess != NULL; sess = sess->next) {
+                    cursor += sprintf((char *) (messageSend.data) + cursor,
+                                      "\t%d", sess->id);
+                }
+                messageSend.data[cursor++] = '\n';
+            }
+
+            printf("Query Result:\n%s", messageSend.data);
         }
 
         if (toSend == true) {
-            printf ("Sending message\n");
-            // add source and size for messageSend and then send packet
+            // Add source and size for pktSend and send packet
+            printf("Got here\n");
             memcpy(messageSend.source, new_user->username, USERNAME_LEN);
+            printf("Got here 2\n");
             messageSend.size = strlen((char *) (messageSend.data));
+            printf("Got here 3\n");
 
             memset(recvBuffer, 0, BUFFER_SIZE);
+            printf("Got here 4\n");
             messageToString(&messageSend, recvBuffer);
-            if ((bytesRecieved = send(new_user->socketFD, recvBuffer,
-                                      BUFFER_SIZE - 1, 0)) == -1) {
-                printf("error sending the message packet\n");
+
+            printf("recvBuffer: %s\n", recvBuffer);
+            printf("Got here 5\n");
+
+            printf("messageSend size: %d\n", messageSend.size);
+            printf("messageSend source: %s\n", messageSend.source);
+            printf("messageSend type: %d\n", messageSend.type);
+            printf("messageSend data: %s\n", messageSend.data);
+
+            if ((bytesSent = send(new_user->socketFD, recvBuffer,
+                                  BUFFER_SIZE - 1, 0)) == -1) {
+                perror("error send\n");
             }
         }
         printf("\n");
@@ -419,35 +440,39 @@ void *handle_new_client(void *args) {
         pthread_mutex_lock(&userConnectedCountMutex);
         numOfConnectedUsers = numOfConnectedUsers - 1;
         pthread_mutex_unlock(&userConnectedCountMutex);
-
-        printf("User has exited\n");
     }
+
+    printf("User has exited\n");
     return NULL;
 }
 
 int main() {
-    // Get the user input
-    memset(globalInputBuffer, 0, BUFFER_SIZE * sizeof(char));
-    fgets(globalInputBuffer, BUFFER_SIZE, stdin);
-    char *compare;
-    if ((compare = strstr(globalInputBuffer, "server ")) != NULL) {
-        memcpy(port, compare + 7, sizeof(char) * (strlen(compare + 7) - 1));
+    // Get user input
+    memset(globalInputBuffer, 0, INPUT_BUFFER_SIZE * sizeof(char));
+    fgets(globalInputBuffer, INPUT_BUFFER_SIZE, stdin);
+    char *pch;
+    if ((pch = strstr(globalInputBuffer, "server ")) != NULL) {
+        memcpy(port, pch + 7, sizeof(char) * (strlen(pch + 7) - 1));
     } else {
-        printf("Usage: server -<TCP port number to listen on>\n");
+        perror("Usage: server -<TCP port number to listen on>\n");
+        exit(1);
     }
     printf("Server: starting at port %s...\n", port);
 
-    // Load the authentication file (a file of usernames and passwords)
-    FILE *filePointer;
-    if ((filePointer = fopen(USER_LIST, "r")) == NULL) {
-        printf("Can't open input file %s\n", USER_LIST);
+
+    // Load userlist at startup
+    FILE *fp;
+    if ((fp = fopen(USER_LIST, "r")) == NULL) {
+        fprintf(stderr, "Can't open input file %s\n", USER_LIST);
     }
-    globalUserList = initUserList(filePointer);
-    fclose(filePointer);
+    globalUserList = initUserList(fp);
+    fclose(fp);
     printf("Server: Userdata loaded\n");
 
-    // Setup the server
-    int sockFD;
+    // Setup server
+    int sockfd;     // listen on sock_fd, new connection on new_fd
+
+    // int new_fd;
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage their_addr; // connector's address information
     socklen_t sin_size;
@@ -455,7 +480,9 @@ int main() {
     int yes = 1;
     char s[INET6_ADDRSTRLEN];
     int rv;
+
     memset(&hints, 0, sizeof(hints));
+    // hints.ai_family = AF_UNSPEC;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;    // Use TCP
     hints.ai_flags = AI_PASSIVE;        // use my IP
@@ -464,52 +491,57 @@ int main() {
         return 1;
     }
 
+    // loop through all the results and bind to the first we can
     for (p = servinfo; p != NULL; p = p->ai_next) {
-        if ((sockFD = socket(p->ai_family, p->ai_socktype,
+        if ((sockfd = socket(p->ai_family, p->ai_socktype,
                              p->ai_protocol)) == -1) {
             perror("Server: socket");
             continue;
         }
-        if (setsockopt(sockFD, SOL_SOCKET, SO_REUSEADDR, &yes,
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
                        sizeof(int)) == -1) {
-            printf("there was an error with setsockopt");
+            perror("setsockopt");
+            exit(1);
         }
-        if (bind(sockFD, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockFD);
-            printf("there was an error with the server binding to a "
-                   "port");
+        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("Server: bind");
             continue;
         }
         break;
     }
     freeaddrinfo(servinfo); // all done with this structure
     if (p == NULL) {
-        printf("Server failed to bind\n");
+        fprintf(stderr, "Server: failed to bind\n");
+        exit(1);
     }
-
     // Server exits after a while if no user online
     struct timeval timeout;
     timeout.tv_sec = 300;
     timeout.tv_usec = 0;
-    if (setsockopt(sockFD, SOL_SOCKET, SO_RCVTIMEO, (void *) &timeout, sizeof
-            (timeout)) < 0) {
-        printf("setsockopt failed\n");
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (void *) &timeout,
+                   sizeof(timeout)) < 0) {
+        fprintf(stderr, "setsockopt failed\n");
     }
+
 
     // Listen on incoming port
-    if (listen(sockFD, PENDING_CONN) == -1) {
-        printf("error listening on socket fd");
+    if (listen(sockfd, PENDING_CONN) == -1) {
+        perror("listen");
+        exit(1);
     }
-    printf("Server: waiting for connections\n");
+    printf("Server: waiting for connections...\n");
 
-    // Accept incoming connections loop
+
+    // main accept() loop
+
     do {
         while (1) {
 
             // Accept new incoming connections
             User *newUsr = calloc(sizeof(User), 1);
             sin_size = sizeof(their_addr);
-            newUsr->socketFD = accept(sockFD, (struct sockaddr *) &their_addr,
+            newUsr->socketFD = accept(sockfd, (struct sockaddr *) &their_addr,
                                       &sin_size);
             if (newUsr->socketFD == -1) {
                 perror("accept");
@@ -522,7 +554,7 @@ int main() {
 
             // Increment userConnectedCnt
             pthread_mutex_lock(&userConnectedCountMutex);
-            numOfConnectedUsers = numOfConnectedUsers + 1;
+            ++numOfConnectedUsers;
             pthread_mutex_unlock(&userConnectedCountMutex);
 
             // Create new thread to handle the new socket
@@ -532,11 +564,12 @@ int main() {
         }
     } while (numOfConnectedUsers > 0);
 
+
     // Free global memory on exit
     deleteUserList(globalUserList);
     deleteUserList(globalUserListLoggedIn);
     deleteSessionList(globalSessionList);
-    close(sockFD);
-    printf("Server closed\n");
+    close(sockfd);
+    printf("Server Terminated\n");
     return 0;
 }
