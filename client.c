@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -37,17 +38,18 @@ void *receive(void *sockfd) {
             printf("Error: Join failure. Detail: %s\n", message.data);
             insession = false;
         } else if (message.type == NS_ACK) {
-            printf("Success: Successfully created and joined session %s.\n", message.data);
+            printf("Successfully created and joined session %s.\n", message.data);
             insession = true;
         } else if (message.type == MESSAGE) {
             printf("%s: %s\n", message.source, message.data);
         } else if (message.type == QU_ACK) {
-            printf("Success: User id\t\tSession ids\n%s", message.data);
+            printf("User id\t\tSession ids\n%s", message.data);
         } else {
             printf("Warning: Unexpected packet received: type %d, data %s\n", message.type, message.data);
         }
         // Flush stdout to ensure immediate display of messages
-        fflush(stdout);
+        //fflush(stdout);
+        //printf ("\n");
     }
     return NULL;
 }
@@ -70,7 +72,7 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
     server_ip = command;
     command = strtok(NULL, " ");
     server_port = command;
-    printf ("Username:%s Password:%s Server IP:%s Server Port:%s\n", username, password, server_ip, server_port);
+    //printf ("Username:%s Password:%s Server IP:%s Server Port:%s\n", username, password, server_ip, server_port);
     if (username == NULL || password == NULL || server_ip == NULL || server_port == NULL){
         printf ("Invalid login command. /login <client_id> <password> <server_ip> <server_port>\n");
         return;
@@ -91,7 +93,7 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
             perror("getaddrinfo");
             return;
         }
-        printf ("Address resolution result: %d\n", address_resolution_result);
+        //printf ("Address resolution result: %d\n", address_resolution_result);
 
         // Iterate over the list of server addresses and connect
         for(current_address_info = server_address_info; current_address_info != NULL; current_address_info = current_address_info->ai_next) {
@@ -140,15 +142,15 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
             *sockfd = -1;
             return;
         }
-        printf ("buffer before null: %s\n", buffer);
+        // printf ("buffer before null: %s\n", buffer);
         buffer[bytes] = '\0';
-        printf ("buffer: %s\n", buffer);
+        // printf ("buffer: %s\n", buffer);
         stringToMessage(buffer, &login_message);
 
-        printf("received type: %d\n", login_message.type);
-        printf("received source: %s\n", login_message.source);
-        printf("received data: %s\n", login_message.data);
-        printf("received size: %d\n", login_message.size);
+        // printf("received type: %d\n", login_message.type);
+        // printf("received source: %s\n", login_message.source);
+        // printf("received data: %s\n", login_message.data);
+        // printf("received size: %d\n", login_message.size);
 
         // Handle login response
         if (login_message.type == LO_ACK && pthread_create(thread_p, NULL, receive, sockfd) == 0) {
@@ -271,8 +273,10 @@ void leave_session(int sockfd) {
 
 
 
-void create_session(int sockfd) {
+void create_session(char* command, int sockfd) {
     // Check if the client is logged in
+    command = strtok(NULL, " ");
+    char* sessionnumber = command;
     if (sockfd == -1) {
         printf("Error: You have not logged in to any server.\n");
         return;
@@ -288,6 +292,8 @@ void create_session(int sockfd) {
     Message create_message;
     create_message.type = NEW_SESS;
     create_message.size = 0;
+    strncpy(create_message.data, sessionnumber, SOURCE_SIZE);
+    create_message.size = strlen(create_message.data);
     messageToString(&create_message, buffer);
     if ((bytes = send(sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
         perror("send");
@@ -326,7 +332,7 @@ void send_message(int sockfd) {
         return;
     }
         // Check if the client is engaged in a session
-    else if (insession == -1) {
+    else if (insession == false) {
         printf("Error: You have not been engaged in any session yet.\n");
         return;
     }
@@ -381,7 +387,7 @@ int main(){
             leave_session(sockfd);
         }else if (strcmp(command, "/createsession") == 0) {
             //Create Session
-            create_session(sockfd);
+            create_session(command, sockfd);
         }else if (strcmp (command, "/list") == 0){
             //List
             list (sockfd);

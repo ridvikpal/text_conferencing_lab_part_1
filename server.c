@@ -68,11 +68,11 @@ void *handle_new_client(void *args) {
 
     while (1) {
         // intially clear all buffers and message packets
-        printf("started while loop\n");
+        //printf("started while loop\n");
         memset(recvBuffer, 0, sizeof(char) * BUFFER_SIZE);
         memset(&messageRecieved, 0, sizeof(Message));
         memset(&messageSend, 0, sizeof(Message));
-        printf("cleared buffers with memset\n");
+        //printf("cleared buffers with memset\n");
 
         // we do buffer size - 1 because we need to add null character to the
         // end of the buffer to make it a standard c string
@@ -83,7 +83,7 @@ void *handle_new_client(void *args) {
             return NULL;
         }
 
-        printf("got data from recv\n");
+        //printf("got data from recv\n");
         // add null character to make the data a string
         recvBuffer[bytesRecieved] = '\0';
         toSend = false;
@@ -272,48 +272,63 @@ void *handle_new_client(void *args) {
             pthread_mutex_unlock(&userLoginMutex);
         } else if (messageRecieved.type == NEW_SESS) {
             printf("User %s is making a new session\n", new_user->username);
-
-            // update the global session list
-            messageToString(&messageSend, recvBuffer);
-            pthread_mutex_lock(&sessionListMutex);
-            globalSessionList = initNewSession(globalSessionList,
-                                               numOfSessions);
-            pthread_mutex_unlock(&sessionListMutex);
-
-            // join the current user to the session that was just created
-            sessionJoined = initNewSession(sessionJoined, numOfSessions);
-            pthread_mutex_lock(&sessionListMutex);
-            globalSessionList = insertNewUserIntoSession(globalSessionList,
-                                                         numOfSessions,
-                                                         new_user);
-            pthread_mutex_unlock(&sessionListMutex);
-
-            // Update user status in the global user logged in list;
-            pthread_mutex_lock(&userLoginMutex);
-            for (User *user = globalUserListLoggedIn;
-                 user != NULL; user = user->next) {
-                if (strcmp(user->username, source) == 0) {
-                    user->inSession = 1;
-                    user->joinedSession = initNewSession(
-                            user->joinedSession,
-                            numOfSessions);
+            int sessid = atoi(messageRecieved.data);
+            bool exists = false;
+            for (Session *sess = globalSessionList; sess !=NULL; sess = sess->next){
+                if (sessid == globalSessionList->id){
+                    printf ("Session %d already exists\n", sessid);
+                    exists = true;
+                    break;
                 }
             }
-            pthread_mutex_unlock(&userLoginMutex);
+            if (!exists){
+                // update the global session list
+                messageToString(&messageSend, recvBuffer);
 
-            // update the message to send
-            messageSend.type = NS_ACK;
-            toSend = true;
-            // we have to send the number of sessions back to the client
-            sprintf((char *) (messageSend.data), "%d", numOfSessions);
+                //printf ("%s\n",recvBuffer);
+                //printf ("%s\n", messageRecieved.data);
+                
 
-            // increase the number of sessions since we made a new one
-            pthread_mutex_lock(&sessionCountMutex);
-            numOfSessions = numOfSessions + 1;
-            pthread_mutex_unlock(&sessionCountMutex);
+                pthread_mutex_lock(&sessionListMutex);
+                globalSessionList = initNewSession(globalSessionList,
+                                                sessid);
+                pthread_mutex_unlock(&sessionListMutex);
 
-            printf("User %s has successfully created session %d\n",
-                   new_user->username, numOfSessions - 1);
+                // join the current user to the session that was just created
+                sessionJoined = initNewSession(sessionJoined, sessid);
+                pthread_mutex_lock(&sessionListMutex);
+                globalSessionList = insertNewUserIntoSession(globalSessionList,
+                                                            sessid,
+                                                            new_user);
+                pthread_mutex_unlock(&sessionListMutex);
+
+                // Update user status in the global user logged in list;
+                pthread_mutex_lock(&userLoginMutex);
+                for (User *user = globalUserListLoggedIn;
+                    user != NULL; user = user->next) {
+                    if (strcmp(user->username, source) == 0) {
+                        user->inSession = 1;
+                        user->joinedSession = initNewSession(
+                                user->joinedSession,
+                                sessid);
+                    }
+                }
+                pthread_mutex_unlock(&userLoginMutex);
+
+                // update the message to send
+                messageSend.type = NS_ACK;
+                toSend = true;
+                // we have to send the number of sessions back to the client
+                sprintf((char *) (messageSend.data), "%d", sessid);
+
+                // increase the number of sessions since we made a new one
+                pthread_mutex_lock(&sessionCountMutex);
+                numOfSessions = numOfSessions + 1;
+                pthread_mutex_unlock(&sessionCountMutex);
+
+                printf("User %s has successfully created session %d\n",
+                    new_user->username, sessid);
+            }
         } else if (messageRecieved.type == MESSAGE) {
 
             printf("User %s is sending message \"%s\"\n",
@@ -380,23 +395,23 @@ void *handle_new_client(void *args) {
 
         if (toSend == true) {
             // Add source and size for pktSend and send packet
-            printf("Got here\n");
+            // printf("Got here\n");
             memcpy(messageSend.source, new_user->username, USERNAME_LEN);
-            printf("Got here 2\n");
+            // printf("Got here 2\n");
             messageSend.size = strlen((char *) (messageSend.data));
-            printf("Got here 3\n");
+            // printf("Got here 3\n");
 
             memset(recvBuffer, 0, BUFFER_SIZE);
-            printf("Got here 4\n");
+            // printf("Got here 4\n");
             messageToString(&messageSend, recvBuffer);
 
-            printf("recvBuffer: %s\n", recvBuffer);
-            printf("Got here 5\n");
+            // printf("recvBuffer: %s\n", recvBuffer);
+            // printf("Got here 5\n");
 
-            printf("messageSend size: %d\n", messageSend.size);
-            printf("messageSend source: %s\n", messageSend.source);
-            printf("messageSend type: %d\n", messageSend.type);
-            printf("messageSend data: %s\n", messageSend.data);
+            // printf("messageSend size: %d\n", messageSend.size);
+            // printf("messageSend source: %s\n", messageSend.source);
+            // printf("messageSend type: %d\n", messageSend.type);
+            // printf("messageSend data: %s\n", messageSend.data);
 
             if ((bytesSent = send(new_user->socketFD, recvBuffer,
                                   BUFFER_SIZE - 1, 0)) == -1) {
