@@ -11,7 +11,7 @@
 #include "session.h"
 #include "user.h"
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 64
 
 bool insession = false;
 char buffer[BUFFER_SIZE];
@@ -22,9 +22,9 @@ void *receive(void *sockfd) {
     int *socketfd_p = (int *)sockfd;
     int bytes;
     Message message;
-    while (true){
+    while (true) {
         if ((bytes = recv(*socketfd_p, buffer, BUFFER_SIZE - 1, 0)) == -1) {
-            printf("Error: Failed to receive data from the server.\n");
+            perror("recv");
             return NULL;
         }
         if (bytes == 0) continue;
@@ -39,19 +39,19 @@ void *receive(void *sockfd) {
         } else if (message.type == NS_ACK) {
             printf("Success: Successfully created and joined session %s.\n", message.data);
             insession = true;
+        } else if (message.type == MESSAGE) {
+            printf("%s: %s\n", message.source, message.data);
         } else if (message.type == QU_ACK) {
             printf("Success: User id\t\tSession ids\n%s", message.data);
-        } else if (message.type == MESSAGE){
-            printf("%s: %s\n", message.source, message.data);
         } else {
-            printf("Warning: Unexpected packet received: type %d, data %s\n",
-                   message.type, message.data);
+            printf("Warning: Unexpected packet received: type %d, data %s\n", message.type, message.data);
         }
         // Flush stdout to ensure immediate display of messages
         fflush(stdout);
     }
     return NULL;
 }
+
 
 void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
@@ -70,6 +70,7 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
     server_ip = command;
     command = strtok(NULL, " ");
     server_port = command;
+    printf ("Username:%s Password:%s Server IP:%s Server Port:%s\n", username, password, server_ip, server_port);
     if (username == NULL || password == NULL || server_ip == NULL || server_port == NULL){
         printf ("Invalid login command. /login <client_id> <password> <server_ip> <server_port>\n");
         return;
@@ -87,19 +88,20 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
 
         // Get address info for the server
         if ((address_resolution_result = getaddrinfo(server_ip, server_port, &address_resolution_hints, &server_address_info)) != 0) {
-            fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(address_resolution_result));
+            perror("getaddrinfo");
             return;
         }
+        printf ("Address resolution result: %d\n", address_resolution_result);
 
         // Iterate over the list of server addresses and connect
         for(current_address_info = server_address_info; current_address_info != NULL; current_address_info = current_address_info->ai_next) {
             if ((*sockfd = socket(current_address_info->ai_family, current_address_info->ai_socktype, current_address_info->ai_protocol)) == -1) {
-                printf ("Error with client socket");
+                perror("socket");
                 continue;
             }
             if (connect(*sockfd, current_address_info->ai_addr, current_address_info->ai_addrlen) == -1) {
                 close(*sockfd);
-                printf("Error with client connection\n");
+                perror("connect");
                 continue;
             }
             break;
@@ -107,7 +109,7 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
 
         // Check if connection succeeded
         if (current_address_info == NULL) {
-            printf("Error, failed to connect from addrinfo\n");
+            perror("connect");
             close(*sockfd);
             *sockfd = -1;
             return;
@@ -126,13 +128,13 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
         login_message.size = strlen(login_message.data);
         messageToString(&login_message, buffer);
         if ((bytes = send(*sockfd, buffer, BUFFER_SIZE-1, 0))==-1){
-            printf("Error sending message\n");
+            perror("send");
             close (*sockfd);
             *sockfd = -1;
             return;
         }
         if ((bytes = recv(*sockfd, buffer, BUFFER_SIZE-1, 0)) == -1){
-            printf ("Error with recv\n");
+            perror("recv");
             close (*sockfd);
             *sockfd = -1;
             return;
@@ -149,7 +151,7 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
             *sockfd = -1;
             return;
         } else {
-            printf("Error, in message received: type %d, data %s\n", login_message.type, login_message.data);
+            printf("Error: message received: type %d, data %s\n", login_message.type, login_message.data);
             close(*sockfd);
             *sockfd = -1;
             return;
@@ -160,7 +162,7 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
 void logout(int *sockfd, pthread_t *thread_p) {
     // Check if the client is logged in
     if (*sockfd == -1) {
-        printf("Error, you are not logged in to any server.\n");
+        printf("Error: not logged in to any server.\n");
         return;
     }
 
@@ -172,12 +174,14 @@ void logout(int *sockfd, pthread_t *thread_p) {
     messageToString(&exit_message, buffer);
 
     if ((bytes = send(*sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
+        perror("send");
         printf("Error: Failed to send exit packet to the server.\n");
         return;
     }
 
     // Cancel the receive thread
     if (pthread_cancel(*thread_p)) {
+        perror("pthread_cancel");
         printf("Error: Failed to cancel the receive thread.\n");
     } else {
         printf("Success: Receive thread canceled successfully.\n");
@@ -189,6 +193,7 @@ void logout(int *sockfd, pthread_t *thread_p) {
 
     printf("Success: Logout completed.\n");
 }
+
 
 void join_session(char *command, int *sockfd) {
     // Check if the client is logged in
@@ -219,11 +224,13 @@ void join_session(char *command, int *sockfd) {
         join_message.size = strlen(join_message.data);
         messageToString(&join_message, buffer);
         if ((bytes = send(*sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
+            perror("send");
             printf("Error: Failed to send join session request to the server.\n");
             return;
         }
     }
 }
+
 
 
 void leave_session(int sockfd) {
@@ -245,6 +252,7 @@ void leave_session(int sockfd) {
     leave_message.size = 0;
     messageToString(&leave_message, buffer);
     if ((bytes = send(sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
+        perror("send");
         printf("Error: Failed to send leave session request to the server.\n");
         return;
     }
@@ -252,6 +260,7 @@ void leave_session(int sockfd) {
     // Update client state to reflect leaving the session
     insession = false;
 }
+
 
 
 void create_session(int sockfd) {
@@ -273,10 +282,12 @@ void create_session(int sockfd) {
     create_message.size = 0;
     messageToString(&create_message, buffer);
     if ((bytes = send(sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
+        perror("send");
         printf("Error: Failed to send create session request to the server.\n");
         return;
     }
 }
+
 
 
 void list(int sockfd) {
@@ -293,10 +304,12 @@ void list(int sockfd) {
     list_message.size = 0;
     messageToString(&list_message, buffer);
     if ((bytes = send(sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
+        perror("send");
         printf("Error: Failed to send query request to the server.\n");
         return;
     }
 }
+
 
 void send_message(int sockfd) {
     // Check if the client is logged in
@@ -320,10 +333,12 @@ void send_message(int sockfd) {
     message.size = strlen(message.data);
     messageToString(&message, buffer);
     if ((bytes = send(sockfd, buffer, BUFFER_SIZE - 1, 0)) == -1) {
+        perror("send");
         printf("Error: Failed to send message to the server.\n");
         return;
     }
 }
+
 
 int main(){
     char *command;
@@ -335,6 +350,7 @@ int main(){
         fgets(buffer, BUFFER_SIZE-1, stdin);
         buffer[strcspn(buffer, "\n")] = 0; // Remove trailing newline if present
         command = buffer;
+        //printf ("%s\n", buffer);
         while (*command == ' '){
             command++;
         }

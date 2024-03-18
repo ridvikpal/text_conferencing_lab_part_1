@@ -370,6 +370,7 @@ void *handle_new_client(void *args) {
         }
 
         if (toSend == true) {
+            printf ("Sending message\n");
             // add source and size for messageSend and then send packet
             memcpy(messageSend.source, new_user->username, USERNAME_LEN);
             messageSend.size = strlen((char *) (messageSend.data));
