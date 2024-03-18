@@ -10,13 +10,13 @@ TARGETS = server client
 all: $(TARGETS)
 
 server: server.o message.o session.o user.o
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+	$(CC) -g -o $@ $^ $(CFLAGS) $(LIBS)
 
 client: client.o message.o session.o user.o
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+	$(CC)  -g -o $@ $^ $(CFLAGS) $(LIBS)
 
 %.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS)
+	$(CC) -g -c -o $@ $< $(CFLAGS)
 
 clean:
 	rm -f $(TARGETS) *.o
