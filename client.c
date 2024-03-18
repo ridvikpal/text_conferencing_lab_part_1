@@ -123,8 +123,8 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
         int bytes;
         Message login_message;
         login_message.type = LOGIN;
-        strncpy(login_message.source, username, SOURCE_SIZE-1);
-        strncpy(login_message.data, password, SOURCE_SIZE-1);
+        strncpy(login_message.source, username, SOURCE_SIZE);
+        strncpy(login_message.data, password, DATA_SIZE);
         login_message.size = strlen(login_message.data);
         messageToString(&login_message, buffer);
         if ((bytes = send(*sockfd, buffer, BUFFER_SIZE-1, 0))==-1){
@@ -133,14 +133,22 @@ void login (char *command, int *sockfd, pthread_t *thread_p){
             *sockfd = -1;
             return;
         }
+        memset(buffer, 0, sizeof(buffer));
         if ((bytes = recv(*sockfd, buffer, BUFFER_SIZE-1, 0)) == -1){
             perror("recv");
             close (*sockfd);
             *sockfd = -1;
             return;
         }
-        buffer[bytes] = 0;
+        printf ("buffer before null: %s\n", buffer);
+        buffer[bytes] = '\0';
+        printf ("buffer: %s\n", buffer);
         stringToMessage(buffer, &login_message);
+
+        printf("received type: %d\n", login_message.type);
+        printf("received source: %s\n", login_message.source);
+        printf("received data: %s\n", login_message.data);
+        printf("received size: %d\n", login_message.size);
 
         // Handle login response
         if (login_message.type == LO_ACK && pthread_create(thread_p, NULL, receive, sockfd) == 0) {
