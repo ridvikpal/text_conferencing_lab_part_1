@@ -11,7 +11,7 @@
 #include "session.h"
 #include "user.h"
 
-#define BUFFER_SIZE 64
+#define BUFFER_SIZE 600
 
 bool insession = false;
 char buffer[BUFFER_SIZE];
