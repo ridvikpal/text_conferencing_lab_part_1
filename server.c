@@ -140,8 +140,7 @@ void *handle_new_client(void *args) {
 
                     // save the username in the source
                     strcpy(source, new_user->username);
-                    free(tempUser);
-
+//                    free(tempUser);
                 } else {
                     printf("Login Error\n");
 
@@ -274,38 +273,39 @@ void *handle_new_client(void *args) {
             printf("User %s is making a new session\n", new_user->username);
             int sessid = atoi(messageRecieved.data);
             bool exists = false;
-            for (Session *sess = globalSessionList; sess !=NULL; sess = sess->next){
-                if (sessid == globalSessionList->id){
-                    printf ("Session %d already exists\n", sessid);
+            for (Session *sess = globalSessionList;
+                 sess != NULL; sess = sess->next) {
+                if (sessid == globalSessionList->id) {
+                    printf("Session %d already exists\n", sessid);
                     exists = true;
                     break;
                 }
             }
-            if (!exists){
+            if (!exists) {
                 // update the global session list
                 messageToString(&messageSend, recvBuffer);
 
                 //printf ("%s\n",recvBuffer);
                 //printf ("%s\n", messageRecieved.data);
-                
+
 
                 pthread_mutex_lock(&sessionListMutex);
                 globalSessionList = initNewSession(globalSessionList,
-                                                sessid);
+                                                   sessid);
                 pthread_mutex_unlock(&sessionListMutex);
 
                 // join the current user to the session that was just created
                 sessionJoined = initNewSession(sessionJoined, sessid);
                 pthread_mutex_lock(&sessionListMutex);
                 globalSessionList = insertNewUserIntoSession(globalSessionList,
-                                                            sessid,
-                                                            new_user);
+                                                             sessid,
+                                                             new_user);
                 pthread_mutex_unlock(&sessionListMutex);
 
                 // Update user status in the global user logged in list;
                 pthread_mutex_lock(&userLoginMutex);
                 for (User *user = globalUserListLoggedIn;
-                    user != NULL; user = user->next) {
+                     user != NULL; user = user->next) {
                     if (strcmp(user->username, source) == 0) {
                         user->inSession = 1;
                         user->joinedSession = initNewSession(
@@ -327,7 +327,7 @@ void *handle_new_client(void *args) {
                 pthread_mutex_unlock(&sessionCountMutex);
 
                 printf("User %s has successfully created session %d\n",
-                    new_user->username, sessid);
+                       new_user->username, sessid);
             }
         } else if (messageRecieved.type == MESSAGE) {
 
@@ -380,6 +380,8 @@ void *handle_new_client(void *args) {
 
             for (User *user = globalUserListLoggedIn;
                  user != NULL; user = user->next) {
+                printf("User in global logged in user list: %s\n",
+                       user->username);
                 cursor += sprintf((char *) (messageSend.data) + cursor,
                                   "%s", user->username);
                 for (Session *sess = user->joinedSession;
